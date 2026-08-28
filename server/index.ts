@@ -195,6 +195,23 @@ const start = async () => {
     if (data.request === "get") await pushStatus(data.clientId);
   });
 
+  /* -----------------------------------------------------------------------
+   * Push whenever a client attaches.
+   *
+   * The poll only broadcasts on CHANGE, which is right for a once-a-second
+   * timer but wrong for a client that shows up later: if nothing has changed
+   * since the last broadcast, a freshly opened app would wait forever for a
+   * message that never comes and sit on its empty state. The client's own
+   * request-on-mount covers this only when it does not time out, and it does
+   * time out. So the server pushes on connect too.
+   * --------------------------------------------------------------------- */
+  DeskThing.on(DESKTHING_EVENTS.CLIENT_STATUS, (data) => {
+    if (data?.request === "opened" || data?.request === "connected") {
+      console.log(`[claude-status] client ${data.request}; pushing current state`);
+      void pushStatus(undefined, true);
+    }
+  });
+
   DeskThing.on(DESKTHING_EVENTS.SETTINGS, (event) => {
     const before = cfg.interval;
     applySettings(event?.payload as AppSettings | undefined);
