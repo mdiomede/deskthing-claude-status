@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The Car Thing is a Chromium kiosk on a fixed 800x480 panel. No scrollbars,
+   no text selection, no tap highlight: it is an instrument, not a web page. */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    background: oklch(0.155 0.008 70);
+  }
+
+  body {
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    font-family:
+      "Inter",
+      "Roboto",
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Scrolling still works, it just is not decorated. */
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  button {
+    background: transparent;
+    border: none;
+  }
+  button:focus,
+  button:active {
+    outline: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
