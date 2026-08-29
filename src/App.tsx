@@ -154,9 +154,25 @@ const Reader: React.FC<{
     [sessions]
   );
 
-  // Default to the liveliest session, but never fight a manual pick.
+  // Default to the liveliest session, and honour a manual pick - but only
+  // while the picked session is still alive.
+  //
+  // selectedId used to be sticky forever, so once you tapped anything the
+  // content pane stayed welded to it even after that session died. The rail
+  // still listed the live session; the pane you were reading was a corpse's
+  // last message, which is indistinguishable from "the app stopped updating".
+  // A board about what is happening now must not pin itself to what happened.
+  const picked = ordered.find((s) => s.id === selectedId);
   const selected =
-    ordered.find((s) => s.id === selectedId) ?? ordered[0] ?? null;
+    (picked && displayState(picked) !== "gone" ? picked : null) ??
+    ordered[0] ??
+    null;
+
+  // Drop a selection once its session has gone quiet, so the next render is
+  // free to follow the live one rather than re-resolving a dead id every time.
+  useEffect(() => {
+    if (picked && displayState(picked) === "gone") setSelectedId(null);
+  }, [picked, sessions]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: 0 });

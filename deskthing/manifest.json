@@ -1,34 +1,32 @@
 {
-    "id":  "claudestatus",
-    "isWebApp":  true,
-    "requires":  [
-
-                 ],
-    "label":  "Claude Status",
-    "version":  "0.1.5",
-    "version_code":  11.0,
-    "compatible_server":  [
-                              11
-                          ],
-    "compatible_client":  [
-                              11
-                          ],
-    "description":  "Shows every running Claude Code session and whether it is working, blocked waiting on you, idle, or done.",
-    "author":  "Matt",
-    "platforms":  [
-                      "windows",
-                      "mac",
-                      "linux"
-                  ],
-    "homepage":  "https://github.com/mdiomede/deskthing-claude-status",
-    "repository":  "https://github.com/mdiomede/deskthing-claude-status",
-    "tags":  [
-                 "webappOnly"
-             ],
-    "requiredVersions":  {
-                             "server":  "\u003e=0.11.0",
-                             "client":  "\u003e=0.11.0"
-                         },
-    "updateUrl":  "",
-    "template":  "base"
+  "id": "claudestatus",
+  "isWebApp": true,
+  "requires": [],
+  "label": "Claude Status",
+  "version": "0.1.6",
+  "version_code": 11.0,
+  "compatible_server": [
+    11
+  ],
+  "compatible_client": [
+    11
+  ],
+  "description": "Shows every running Claude Code session and whether it is working, blocked waiting on you, idle, or done.",
+  "author": "Matt",
+  "platforms": [
+    "windows",
+    "mac",
+    "linux"
+  ],
+  "homepage": "https://github.com/mdiomede/deskthing-claude-status",
+  "repository": "https://github.com/mdiomede/deskthing-claude-status",
+  "tags": [
+    "webappOnly"
+  ],
+  "requiredVersions": {
+    "server": ">=0.11.0",
+    "client": ">=0.11.0"
+  },
+  "updateUrl": "",
+  "template": "base"
 }
