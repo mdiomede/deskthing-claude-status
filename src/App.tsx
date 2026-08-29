@@ -50,23 +50,26 @@ const LABEL: Record<DisplayState, string> = {
   gone: "gone quiet",
 };
 
-// Only the alert state gets colour. Everything else is one warm greyscale, so
-// brightness alone encodes how much you should care.
+// Each state gets its own hue in the rail so the board is readable at a glance
+// without reading a word of it. Amber is still reserved for "waiting on you" -
+// nothing else uses that hue, and stale only gets a dimmed version of it,
+// because a session that stopped reporting is a weaker form of the same news.
+// The two dead states stay grey: absence of colour means absence of activity.
 const TONE: Record<DisplayState, string> = {
   blocked: "text-signal",
-  working: "text-bone",
-  done: "text-bonedim",
+  working: "text-live",
+  done: "text-good",
   idle: "text-muted",
-  stale: "text-faint",
+  stale: "text-signaldim",
   gone: "text-faint",
 };
 
 const DOT: Record<DisplayState, string> = {
   blocked: "bg-signal",
-  working: "bg-bone",
-  done: "bg-bonedim",
+  working: "bg-live",
+  done: "bg-good",
   idle: "bg-muted",
-  stale: "bg-faint",
+  stale: "bg-signaldim",
   gone: "bg-groundup",
 };
 

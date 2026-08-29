@@ -3,7 +3,7 @@
   "isWebApp": true,
   "requires": [],
   "label": "Claude Status",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "version_code": 11.0,
   "compatible_server": [
     11

@@ -18,6 +18,10 @@ export default {
         // actually waiting on a human, so its presence is the message.
         signal: "oklch(0.79 0.165 76)",
         signaldim: "oklch(0.62 0.130 76)",
+        // Status hues. Amber stays reserved for "waiting on you" - these two sit
+        // at a similar lightness so no single state out-shouts the alert.
+        live: "oklch(0.74 0.130 235)",
+        good: "oklch(0.76 0.145 155)",
       },
       fontSize: {
         // Deliberately steep steps (>=1.25) so hierarchy survives distance.
