@@ -161,6 +161,8 @@ const Reader: React.FC<{
   error?: string;
 }> = ({ sessions, error }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 0 = newest reply. Lets you page back through what a session said earlier.
+  const [msgIndex, setMsgIndex] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
 
   const ordered = useMemo(
@@ -191,9 +193,26 @@ const Reader: React.FC<{
     if (picked && displayState(picked) === "gone") setSelectedId(null);
   }, [picked, sessions]);
 
+  // A different session starts at its newest reply, not wherever you had paged
+  // to in the previous one.
+  useEffect(() => {
+    setMsgIndex(0);
+  }, [selected?.id]);
+
   useEffect(() => {
     scroller.current?.scrollTo({ top: 0 });
-  }, [selected?.id, selected?.message]);
+  }, [selected?.id, msgIndex, selected?.message]);
+
+  // Newest first. Older hooks wrote only `message`, so fall back to it rather
+  // than showing an empty pane after an app update.
+  const history: string[] =
+    selected?.messages && selected.messages.length
+      ? selected.messages
+      : selected?.message
+      ? [selected.message]
+      : [];
+  const idx = Math.min(msgIndex, Math.max(0, history.length - 1));
+  const body = history[idx];
 
   /* -----------------------------------------------------------------------
    * Take the wheel.
@@ -357,9 +376,37 @@ const Reader: React.FC<{
             className="min-h-0 flex-1 overflow-y-auto px-7 pb-8"
             style={{ WebkitOverflowScrolling: "touch" }}
           >
-            {selected.message ? (
+            {/* History pager. Sits under the header, not in it: the top edge is
+                the system pull-down and the bottom is the now-playing bar, so
+                touch targets have to live in the middle band. Hidden entirely
+                when there is only one reply - no dead chrome. */}
+            {history.length > 1 && (
+              <div className="mb-3 flex items-center gap-3">
+                <button
+                  onClick={() => setMsgIndex((i) => Math.min(history.length - 1, i + 1))}
+                  className={`rounded-lg px-3 py-1.5 text-lg font-bold ${
+                    idx >= history.length - 1 ? "text-groundup" : "bg-groundup text-bone"
+                  }`}
+                >
+                  &#8249; older
+                </button>
+                <span className="text-tag font-semibold uppercase tabular-nums text-faint">
+                  {idx === 0 ? "latest" : `${idx + 1} of ${history.length}`}
+                </span>
+                <button
+                  onClick={() => setMsgIndex((i) => Math.max(0, i - 1))}
+                  className={`rounded-lg px-3 py-1.5 text-lg font-bold ${
+                    idx === 0 ? "text-groundup" : "bg-groundup text-bone"
+                  }`}
+                >
+                  newer &#8250;
+                </button>
+              </div>
+            )}
+
+            {body ? (
               <p className="whitespace-pre-wrap break-words text-[1.3rem] leading-[1.45] text-bonedim">
-                {selected.message}
+                {body}
               </p>
             ) : (
               <p className="pt-6 text-row font-bold text-groundup">

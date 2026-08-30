@@ -10,11 +10,19 @@ export type ClaudeSession = {
   state: SessionState;
   updated: string; // ISO-8601, UTC
   /**
-   * Text of the last assistant reply, captured from the Stop hook's
-   * `last_assistant_message`. Truncated by the hook; may be absent for a
-   * session that has not finished a turn yet.
+   * Text of the most recent assistant reply. Kept as messages[0]; retained as
+   * its own field so an older installed client still shows something.
    */
   message?: string;
+  /**
+   * Recent replies, NEWEST FIRST, so you can scroll back through what was said
+   * earlier rather than only seeing the last turn. Reconstructed from the
+   * transcript by the hook (a tool call splits a turn into several assistant
+   * messages, so the raw `last_assistant_message` is only its final paragraph).
+   * Depth is capped in the hook - this file is re-read once a second, so it is
+   * not allowed to grow without bound.
+   */
+  messages?: string[];
 };
 
 export type StatusPayload = {

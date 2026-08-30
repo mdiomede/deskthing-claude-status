@@ -86,6 +86,13 @@ const readSessions = async (): Promise<StatusPayload> => {
         : "idle") as SessionState,
       updated: v.updated || now,
       message: v.message || undefined,
+      // Newest first. Fall back to the single message so a state file written
+      // by an older hook still renders.
+      messages: Array.isArray(v.messages)
+        ? (v.messages as string[]).filter((m) => typeof m === "string" && m.trim())
+        : v.message
+        ? [String(v.message)]
+        : undefined,
     }))
     .sort((a, b) => {
       if (a.state === "blocked" && b.state !== "blocked") return -1;
