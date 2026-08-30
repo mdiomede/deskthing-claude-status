@@ -36,9 +36,22 @@ const secondsSince = (iso: string): number => {
 };
 
 const displayState = (s: ClaudeSession): DisplayState => {
+  // Only "working" decays with silence.
+  //
+  // done / idle / blocked are SUPPOSED to be quiet - the turn finished, or it
+  // is waiting on a human. Ageing those into "gone quiet" after 30 minutes
+  // mislabelled precisely the sessions worth reading hours later: prompt here,
+  // switch the monitor to the work machine, come back and read the answer off
+  // this screen. A finished session is not a dead one.
+  //
+  // "working" is different: the hook fires on prompt-submit and stop, not per
+  // tool call, so silence there is ambiguous - a long turn looks identical to a
+  // killed one. Decaying it is the honest way to say "I cannot tell any more".
+  if (s.state !== "working") return s.state;
+
   const ageMs = secondsSince(s.updated) * 1000;
   if (ageMs > GONE_AFTER_MS) return "gone";
-  if (s.state === "working" && ageMs > STALE_AFTER_MS) return "stale";
+  if (ageMs > STALE_AFTER_MS) return "stale";
   return s.state;
 };
 
