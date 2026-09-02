@@ -44,9 +44,12 @@ const displayState = (s: ClaudeSession): DisplayState => {
   // switch the monitor to the work machine, come back and read the answer off
   // this screen. A finished session is not a dead one.
   //
-  // "working" is different: the hook fires on prompt-submit and stop, not per
-  // tool call, so silence there is ambiguous - a long turn looks identical to a
-  // killed one. Decaying it is the honest way to say "I cannot tell any more".
+  // "working" is different. The hook fires only at prompt-submit and turn-end,
+  // so a long turn reports nothing for its whole duration and looks identical
+  // to a killed one; decaying it is the honest way to say "I cannot tell any
+  // more". The server now moves `updated` forward from the transcript, which
+  // IS written throughout a turn, so this decay finally means what it says: a
+  // working session goes quiet here only when the transcript has stopped too.
   if (s.state !== "working") return s.state;
 
   const ageMs = secondsSince(s.updated) * 1000;
@@ -496,16 +499,24 @@ const App: React.FC = () => {
 
   const sessions = status?.sessions ?? [];
 
-  const { blocked, rest } = useMemo(
-    () => ({
-      blocked: sessions.filter((s) => displayState(s) === "blocked"),
-      rest: sessions.filter((s) => displayState(s) !== "blocked"),
-    }),
-    [sessions]
-  );
+  const { blocked, running } = useMemo(() => {
+    const blocked = sessions.filter((s) => displayState(s) === "blocked");
+    return {
+      blocked,
+      // "Other running" has to mean sessions that ARE running.
+      //
+      // This counted every non-blocked session, so a finished one, an idle
+      // window and a terminal closed an hour ago all read as "running" - and
+      // because none of that changes until the hook's prune hours later, the
+      // number sat there being wrong for the whole time the alert was up.
+      // Counting the working ones makes it fall as they finish, on the five
+      // second tick, with no push from the server needed.
+      running: sessions.filter((s) => displayState(s) === "working").length,
+    };
+  }, [sessions]);
 
   if (blocked.length > 0) {
-    return <Alert blocked={blocked} others={rest.length} />;
+    return <Alert blocked={blocked} others={running} />;
   }
 
   return <Reader sessions={sessions} error={status?.error} />;

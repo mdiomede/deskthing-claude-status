@@ -52,7 +52,11 @@ let reading = false;
 const VALID_STATES: SessionState[] = ["blocked", "working", "idle", "done"];
 
 /* ---------------------------------------------------------------------------
- * Recaps: Claude Code's own "away summary", pulled out of the transcript.
+ * What the transcript tells us that the hook cannot.
+ *
+ * Two things are read out of each session's .jsonl on every poll.
+ *
+ * 1. THE RECAP - Claude Code's own "away summary".
  *
  * About three minutes after a turn ends - and only while the terminal is
  * unfocused - Claude appends a system record of subtype "away_summary" to the
@@ -63,6 +67,25 @@ const VALID_STATES: SessionState[] = ["blocked", "working", "idle", "done"];
  *
  * No hook fires when one is written, which is why this is here and not in
  * claude-status.ps1: the file has to be watched.
+ *
+ * 2. LAST ACTIVITY - the timestamp of the newest user or assistant record.
+ *
+ * The hook only fires at prompt-submit and turn-end, so between those two
+ * moments the state file is frozen and says nothing. That produced two visible
+ * lies. A session blocked on a permission prompt stayed "waiting on you" after
+ * the prompt was answered, right up until the whole turn finished. And a long
+ * turn, which is silent for its entire duration, was indistinguishable from a
+ * killed one and decayed to "no word" while it was working perfectly.
+ *
+ * The transcript is appended to throughout, so it settles both. Answering a
+ * permission prompt lets the tool run, and its result lands here - there is no
+ * earlier signal anywhere: Claude Code writes no permission-decision record and
+ * PostToolUse fires at exactly the same moment, for the price of spawning
+ * PowerShell on every tool call.
+ *
+ * Only user and assistant records count. The system ones (turn_duration,
+ * stop_hook_summary, away_summary) are written AFTER a turn ends and would
+ * make a finished session look like it was still going.
  * ------------------------------------------------------------------------- */
 
 /** Only the tail is ever read. A recap is the last thing written to a session's
@@ -75,41 +98,73 @@ const RECAP_FOOTER = /\s*\(disable recaps in \/config\)\s*$/;
 
 type Recap = { text: string; at: string };
 
+/** What one pass over a transcript's tail yields. */
+type TranscriptRead = {
+  recap: Recap | null;
+  /** ISO timestamp of the newest user/assistant record, or null if the window
+   *  held none (a turn whose tool output alone exceeds the tail). */
+  lastActivity: string | null;
+};
+
 /** Re-reading an unchanged file every second would be pure waste, so results
  *  are held against the file's size and mtime and only recomputed when the
  *  transcript actually grows. */
-const recapCache = new Map<
+const transcriptCache = new Map<
   string,
-  { size: number; mtimeMs: number; recap: Recap | null }
+  { size: number; mtimeMs: number; read: TranscriptRead }
 >();
 
-const parseRecap = (chunk: string, truncated: boolean): Recap | null => {
+const parseTranscript = (chunk: string, truncated: boolean): TranscriptRead => {
   const lines = chunk.split("\n");
   // When the read started mid-file, line 0 is the tail of a record that began
   // before the window and cannot be parsed. When it did not, line 0 is a whole
   // record like any other.
   const first = truncated ? 1 : 0;
+
+  let recap: Recap | null = null;
+  let lastActivity: string | null = null;
+
   for (let i = lines.length - 1; i >= first; i--) {
     const line = lines[i];
-    // Cheap reject first: JSON.parse on every line of 64 KB, once a second,
-    // is the kind of thing that turns a status board into a space heater.
-    if (!line.includes("away_summary")) continue;
+
+    // Cheap string tests before JSON.parse. Running the parser over every line
+    // of 64 KB once a second is the kind of thing that turns a status board
+    // into a space heater, and one tool_result line alone can be megabytes.
+    const isRecap = !recap && line.includes("away_summary");
+    const isTurn =
+      !lastActivity &&
+      (line.includes('"type":"assistant"') || line.includes('"type":"user"'));
+    if (!isRecap && !isTurn) continue;
+
     try {
       const rec = JSON.parse(line);
-      if (rec?.type === "system" && rec?.subtype === "away_summary") {
+
+      if (isRecap && rec?.type === "system" && rec?.subtype === "away_summary") {
         const text = String(rec.content ?? "").replace(RECAP_FOOTER, "").trim();
-        if (text && typeof rec.timestamp === "string") {
-          return { text, at: rec.timestamp };
-        }
+        if (text && typeof rec.timestamp === "string") recap = { text, at: rec.timestamp };
+      }
+
+      if (
+        !lastActivity &&
+        (rec?.type === "assistant" || rec?.type === "user") &&
+        typeof rec.timestamp === "string"
+      ) {
+        lastActivity = rec.timestamp;
       }
     } catch {
       /* a torn line mid-write - the next poll gets it */
     }
+
+    // Walking backwards, so the first of each found is the newest.
+    if (recap && lastActivity) break;
   }
-  return null;
+
+  return { recap, lastActivity };
 };
 
-const readRecap = async (path: string): Promise<Recap | null> => {
+const EMPTY_READ: TranscriptRead = { recap: null, lastActivity: null };
+
+const readTranscript = async (path: string): Promise<TranscriptRead> => {
   let size: number;
   let mtimeMs: number;
   try {
@@ -117,36 +172,36 @@ const readRecap = async (path: string): Promise<Recap | null> => {
     size = st.size;
     mtimeMs = st.mtimeMs;
   } catch {
-    recapCache.delete(path);
-    return null;
+    transcriptCache.delete(path);
+    return EMPTY_READ;
   }
 
-  const hit = recapCache.get(path);
-  if (hit && hit.size === size && hit.mtimeMs === mtimeMs) return hit.recap;
+  const hit = transcriptCache.get(path);
+  if (hit && hit.size === size && hit.mtimeMs === mtimeMs) return hit.read;
 
-  let recap: Recap | null = null;
+  let read: TranscriptRead = EMPTY_READ;
   let fh;
   try {
     fh = await open(path, "r");
     const len = Math.min(TAIL_BYTES, size);
     const buf = Buffer.alloc(len);
     await fh.read(buf, 0, len, Math.max(0, size - len));
-    recap = parseRecap(buf.toString("utf-8"), size > len);
+    read = parseTranscript(buf.toString("utf-8"), size > len);
   } catch {
-    recap = null;
+    read = EMPTY_READ;
   } finally {
     await fh?.close().catch(() => {});
   }
 
-  recapCache.set(path, { size, mtimeMs, recap });
-  return recap;
+  transcriptCache.set(path, { size, mtimeMs, read });
+  return read;
 };
 
 /** Forget transcripts belonging to sessions that no longer exist, so a machine
  *  left running for a week does not accumulate an entry per session ever seen. */
-const pruneRecapCache = (live: Set<string>) => {
-  for (const path of recapCache.keys()) {
-    if (!live.has(path)) recapCache.delete(path);
+const pruneTranscriptCache = (live: Set<string>) => {
+  for (const path of transcriptCache.keys()) {
+    if (!live.has(path)) transcriptCache.delete(path);
   }
 };
 
@@ -200,22 +255,33 @@ const readSessions = async (): Promise<StatusPayload> => {
       return (b.updated || "").localeCompare(a.updated || "");
     });
 
-  await attachRecaps(sessions);
+  await reconcileWithTranscripts(sessions);
 
   return { sessions, updated: now };
 };
 
 /**
- * Hang each session's recap off it, if it has one that belongs to the reply
- * currently on screen.
+ * Correct each session against its own transcript.
  *
- * The timestamp test is the whole correctness argument. `updated` is when the
- * session last reported - for a finished turn, when it finished - so a recap
- * newer than that describes THIS turn, and one older describes a turn that has
- * already been superseded. Without it, submitting a new prompt would leave the
- * previous turn's summary sitting over the new reply as though it described it.
+ * Two independent corrections, both resting on the same timestamp comparison
+ * against `updated` - when the session last REPORTED through the hook.
+ *
+ * RECAP: attached only when newer than `updated`, so it describes the reply
+ * currently on screen. An older one belongs to a turn already superseded, and
+ * would otherwise sit over a new reply as though it described it.
+ *
+ * LIVENESS: a session that is working or blocked, whose transcript has moved
+ * since it last reported, is demonstrably still going. Its clock is moved
+ * forward to that activity, and a blocked one is released: the permission
+ * prompt has been answered, because the tool it was waiting on has since
+ * written its result.
+ *
+ * Deliberately NOT applied to done or idle. Those states mean the session
+ * stopped on purpose, and the only records written after a turn ends are
+ * system ones this scan already ignores - but if that ever changes, a finished
+ * session must not be resurrected by its own epilogue.
  */
-const attachRecaps = async (sessions: ClaudeSession[]) => {
+const reconcileWithTranscripts = async (sessions: ClaudeSession[]) => {
   const live = new Set<string>();
 
   await Promise.all(
@@ -223,19 +289,30 @@ const attachRecaps = async (sessions: ClaudeSession[]) => {
       if (!s.transcript) return;
       live.add(s.transcript);
 
-      const recap = await readRecap(s.transcript);
-      if (!recap) return;
-
-      const at = Date.parse(recap.at);
+      const { recap, lastActivity } = await readTranscript(s.transcript);
       const updated = Date.parse(s.updated);
-      if (!Number.isFinite(at) || !Number.isFinite(updated) || at <= updated) return;
+      if (!Number.isFinite(updated)) return;
 
-      s.recap = recap.text;
-      s.recapAt = recap.at;
+      if (recap) {
+        const at = Date.parse(recap.at);
+        if (Number.isFinite(at) && at > updated) {
+          s.recap = recap.text;
+          s.recapAt = recap.at;
+        }
+      }
+
+      if (!lastActivity) return;
+      if (s.state !== "working" && s.state !== "blocked") return;
+
+      const active = Date.parse(lastActivity);
+      if (!Number.isFinite(active) || active <= updated) return;
+
+      s.updated = lastActivity;
+      if (s.state === "blocked") s.state = "working";
     })
   );
 
-  pruneRecapCache(live);
+  pruneTranscriptCache(live);
 };
 
 const pushStatus = async (clientId?: string, force = false) => {
