@@ -47,6 +47,15 @@ export type ClaudeSession = {
    * watching the file is the only way to see one. The client has no use for it.
    */
   transcript?: string;
+  /**
+   * When this session was last marked READ on the device, ISO-8601.
+   *
+   * Purely the device's own opinion - nothing is written back to Claude Code,
+   * and the terminal session neither knows nor cares. A finished session counts
+   * as read only while `readAt >= updated`, so the next turn it finishes makes
+   * it unread again on its own, with no state to clear.
+   */
+  readAt?: string;
 };
 
 export type StatusPayload = {
@@ -65,6 +74,7 @@ export enum SERVER_TYPE {
 /** Message types the CLIENT sends to the SERVER. */
 export enum CLIENT_TYPE {
   STATUS = "claudeStatusRequest",
+  MARK_READ = "claudeStatusMarkRead",
 }
 
 export type ToClientData = {
@@ -73,9 +83,19 @@ export type ToClientData = {
   payload: StatusPayload;
 };
 
-export type ToServerData = {
-  type: CLIENT_TYPE.STATUS;
-  request: "get";
-  payload: undefined;
-  clientId?: string;
-};
+export type ToServerData =
+  | {
+      type: CLIENT_TYPE.STATUS;
+      request: "get";
+      payload: undefined;
+      clientId?: string;
+    }
+  | {
+      type: CLIENT_TYPE.MARK_READ;
+      request: "set";
+      /** `at` is the session's `updated` at the moment it was read, not the
+       *  wall clock, so a turn that lands while you are looking at the screen
+       *  is not silently marked read along with the one you actually saw. */
+      payload: { id: string; at: string };
+      clientId?: string;
+    };

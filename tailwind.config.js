@@ -22,6 +22,10 @@ export default {
         // at a similar lightness so no single state out-shouts the alert.
         live: "oklch(0.74 0.130 235)",
         good: "oklch(0.76 0.145 155)",
+        // Finished, and you have seen it. Same hue as "done" so the row is
+        // still legibly a finished one, dropped to roughly the weight of the
+        // muted neutrals so it stops competing for the glance.
+        gooddim: "oklch(0.50 0.055 155)",
       },
       fontSize: {
         // Deliberately steep steps (>=1.25) so hierarchy survives distance.

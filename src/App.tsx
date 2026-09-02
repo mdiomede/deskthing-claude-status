@@ -28,7 +28,17 @@ const STALE_AFTER_MS = 3 * 60 * 1000;
  */
 const GONE_AFTER_MS = 30 * 60 * 1000;
 
-type DisplayState = SessionState | "stale" | "gone";
+/**
+ * How long a finished session has to sit on screen before it counts as read.
+ *
+ * Long enough that flicking through the rail does not mark everything read on
+ * the way past, short enough that a genuine glance counts - the board exists to
+ * be read from across the room without touching it, so requiring a tap would
+ * miss the normal way it gets used.
+ */
+const READ_DWELL_MS = 4000;
+
+type DisplayState = SessionState | "read" | "stale" | "gone";
 
 const secondsSince = (iso: string): number => {
   const then = Date.parse(iso);
@@ -50,6 +60,18 @@ const displayState = (s: ClaudeSession): DisplayState => {
   // more". The server now moves `updated` forward from the transcript, which
   // IS written throughout a turn, so this decay finally means what it says: a
   // working session goes quiet here only when the transcript has stopped too.
+  // "done" is only worth a bright row while it means finished AND UNREAD. Once
+  // it has been read on the device it keeps its place in the order but stops
+  // shouting. The mark is held against the `updated` that was read, so the
+  // next turn this session finishes is unread again on its own.
+  if (s.state === "done" && s.readAt) {
+    const read = Date.parse(s.readAt);
+    const updated = Date.parse(s.updated);
+    if (Number.isFinite(read) && Number.isFinite(updated) && read >= updated) {
+      return "read";
+    }
+  }
+
   if (s.state !== "working") return s.state;
 
   const ageMs = secondsSince(s.updated) * 1000;
@@ -62,6 +84,7 @@ const LABEL: Record<DisplayState, string> = {
   blocked: "waiting on you",
   working: "working",
   done: "done",
+  read: "read",
   idle: "idle",
   stale: "no word",
   gone: "gone quiet",
@@ -76,6 +99,7 @@ const TONE: Record<DisplayState, string> = {
   blocked: "text-signal",
   working: "text-live",
   done: "text-good",
+  read: "text-gooddim",
   idle: "text-muted",
   stale: "text-signaldim",
   gone: "text-faint",
@@ -85,6 +109,7 @@ const DOT: Record<DisplayState, string> = {
   blocked: "bg-signal",
   working: "bg-live",
   done: "bg-good",
+  read: "bg-gooddim",
   idle: "bg-muted",
   stale: "bg-signaldim",
   gone: "bg-groundup",
@@ -95,9 +120,10 @@ const ORDER: Record<DisplayState, number> = {
   blocked: 0,
   working: 1,
   done: 2,
-  idle: 3,
-  stale: 4,
-  gone: 5,
+  read: 3,
+  idle: 4,
+  stale: 5,
+  gone: 6,
 };
 
 const elapsed = (iso: string): string => {
@@ -201,6 +227,49 @@ const Reader: React.FC<{
   useEffect(() => {
     setMsgIndex(0);
   }, [selected?.id]);
+
+  /* -----------------------------------------------------------------------
+   * Marking a session read.
+   *
+   * Two triggers. Tapping a row in the rail is explicit and immediate. And a
+   * finished session left on screen for a few seconds has been read whether or
+   * not anything was touched - that is how this display is actually used.
+   *
+   * The dwell only runs while the document is VISIBLE, so leaving the app open
+   * behind the clock does not quietly mark everything read. The sent set is
+   * keyed by session AND by the turn that was read, so the next turn it
+   * finishes is unread again and will be sent once more.
+   *
+   * Nothing here reaches Claude Code. It is the device's own opinion.
+   * --------------------------------------------------------------------- */
+  const sent = useRef<Set<string>>(new Set());
+  const markRead = (s: ClaudeSession | null | undefined) => {
+    if (!s || s.state !== "done") return;
+    const key = `${s.id}@${s.updated}`;
+    if (sent.current.has(key)) return;
+    sent.current.add(key);
+    DeskThing.send({
+      type: CLIENT_TYPE.MARK_READ,
+      request: "set",
+      payload: { id: s.id, at: s.updated },
+    });
+  };
+
+  const [visible, setVisible] = useState(
+    typeof document === "undefined" || document.visibilityState !== "hidden"
+  );
+  useEffect(() => {
+    const onVis = () => setVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  useEffect(() => {
+    if (!visible || !selected || selected.state !== "done") return;
+    const s = selected;
+    const t = setTimeout(() => markRead(s), READ_DWELL_MS);
+    return () => clearTimeout(t);
+  }, [visible, selected?.id, selected?.updated, selected?.state]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: 0 });
@@ -325,7 +394,10 @@ const Reader: React.FC<{
             return (
               <button
                 key={s.id}
-                onClick={() => setSelectedId(s.id)}
+                onClick={() => {
+                  setSelectedId(s.id);
+                  markRead(s);
+                }}
                 className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left ${
                   active ? "bg-groundup" : ""
                 }`}

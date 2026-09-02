@@ -43,6 +43,31 @@ const DEFAULTS = { interval: 1, showDone: true };
  * until the process ran out of file descriptors and every read failed EMFILE.
  * Settings now change in exactly one place: the SETTINGS event.
  * ------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+ * Read marks: the device's own opinion, and nobody else's.
+ *
+ * "done" is only interesting while it means finished AND unread - once you have
+ * actually looked at the reply, a green row shouting for attention is noise.
+ * Marking one read changes nothing in Claude Code: no hook, no state file, no
+ * effect on the terminal session, which is exactly what was asked for.
+ *
+ * Held in memory and mirrored into the app's own saved data, so it survives
+ * switching to the clock and back, and a DeskThing restart. Keyed by session id
+ * against the `updated` that was read, so the next turn that session finishes
+ * is unread again with no state to expire or clear.
+ *
+ * NEVER read or written from the poll path. v0.1.0 called getSettings() on
+ * every tick and stacked intervals until the process ran out of file
+ * descriptors; the same discipline applies to saved data.
+ * ------------------------------------------------------------------------- */
+const READ_KEY = "readAt";
+/** The hook prunes a finished session from the state file long before this, so
+ *  a mark older than a couple of days can only belong to a session that no
+ *  longer exists. Generous on purpose: it is a few bytes against forgetting
+ *  that you read something. */
+const READ_MARK_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+let readMarks: Record<string, string> = {};
+
 let cfg = { ...DEFAULTS };
 let cancelPoll: (() => void) | null = null;
 let armedIntervalMs = 0;
@@ -248,6 +273,7 @@ const readSessions = async (): Promise<StatusPayload> => {
         ? [String(v.message)]
         : undefined,
       transcript: v.transcript || undefined,
+      readAt: readMarks[id],
     }))
     .sort((a, b) => {
       if (a.state === "blocked" && b.state !== "blocked") return -1;
@@ -313,6 +339,27 @@ const reconcileWithTranscripts = async (sessions: ClaudeSession[]) => {
   );
 
   pruneTranscriptCache(live);
+};
+
+/**
+ * Write the read marks back to the app's saved data.
+ *
+ * Called only when a mark actually changes - never on the poll path. Ids
+ * accumulate forever otherwise, so this is also where the map is trimmed: a
+ * session that has aged out of the state file cannot be read again, and its
+ * mark is dead weight.
+ */
+const persistReadMarks = () => {
+  const cutoff = Date.now() - READ_MARK_TTL_MS;
+  for (const [id, at] of Object.entries(readMarks)) {
+    const t = Date.parse(at);
+    if (!Number.isFinite(t) || t < cutoff) delete readMarks[id];
+  }
+  try {
+    DeskThing.saveData({ [READ_KEY]: { ...readMarks } });
+  } catch (err) {
+    console.warn("[claude-status] could not save read marks", err);
+  }
 };
 
 const pushStatus = async (clientId?: string, force = false) => {
@@ -414,8 +461,38 @@ const start = async () => {
     /* keep defaults */
   }
 
+  try {
+    const saved = await DeskThing.getData();
+    const marks = saved?.[READ_KEY];
+    if (marks && typeof marks === "object") {
+      for (const [id, at] of Object.entries(marks as Record<string, unknown>)) {
+        if (typeof at === "string" && Number.isFinite(Date.parse(at))) readMarks[id] = at;
+      }
+    }
+    console.log(`[claude-status] restored ${Object.keys(readMarks).length} read marks`);
+  } catch {
+    /* an unreadable mark file just means everything reads as unread */
+  }
+
   DeskThing.on(CLIENT_TYPE.STATUS, async (data) => {
     if (data.request === "get") await pushStatus(data.clientId);
+  });
+
+  DeskThing.on(CLIENT_TYPE.MARK_READ, (data) => {
+    const mark = data?.payload;
+    if (!mark?.id || !mark?.at || !Number.isFinite(Date.parse(mark.at))) return;
+
+    // Only ever move forward. Messages can arrive out of order, and a stale one
+    // must not un-read a turn that has since been read.
+    const held = readMarks[mark.id];
+    if (held && Date.parse(held) >= Date.parse(mark.at)) return;
+    readMarks[mark.id] = mark.at;
+
+    persistReadMarks();
+    // The payload genuinely changed, so let the next push through the
+    // change filter and send it now.
+    lastSerialized = "";
+    void pushStatus(undefined, true);
   });
 
   /* -----------------------------------------------------------------------
