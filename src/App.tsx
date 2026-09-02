@@ -214,6 +214,11 @@ const Reader: React.FC<{
   const idx = Math.min(msgIndex, Math.max(0, history.length - 1));
   const body = history[idx];
 
+  // The recap describes the LATEST turn, so it only belongs over the latest
+  // reply. Paged back to an earlier one, it would be a summary of a different
+  // conversation sitting on top of the text it does not describe.
+  const showRecap = idx === 0 && Boolean(selected?.recap);
+
   /* -----------------------------------------------------------------------
    * Take the wheel.
    *
@@ -380,6 +385,28 @@ const Reader: React.FC<{
                 the system pull-down and the bottom is the now-playing bar, so
                 touch targets have to live in the middle band. Hidden entirely
                 when there is only one reply - no dead chrome. */}
+            {/* The recap leads.
+                Claude writes it for someone returning to a screen - under 40
+                words, plain sentences - which is the same job this display has
+                from across the room. It is a headline for the reply, never a
+                replacement: the full text is right underneath, unabridged. */}
+            {showRecap && (
+              <>
+                <p className="mb-2 text-tag font-semibold uppercase text-faint">
+                  Where it stands
+                </p>
+                <p className="text-recap font-semibold text-bone">
+                  {selected.recap}
+                </p>
+                <div className="mb-4 mt-5 flex items-center gap-3">
+                  <span className="shrink-0 text-tag font-semibold uppercase text-faint">
+                    Full reply
+                  </span>
+                  <span className="h-px flex-1 bg-rule" />
+                </div>
+              </>
+            )}
+
             {history.length > 1 && (
               <div className="mb-3 flex items-center gap-3">
                 <button

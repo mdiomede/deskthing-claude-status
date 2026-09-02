@@ -23,6 +23,30 @@ export type ClaudeSession = {
    * not allowed to grow without bound.
    */
   messages?: string[];
+  /**
+   * Claude Code's own "away summary" for the turn shown in `message`.
+   *
+   * Claude writes one about three minutes after a turn ends, but ONLY while
+   * the terminal is unfocused - its internal prompt is literally "the user
+   * stepped away and is coming back", and it asks for under 40 words, plain
+   * sentences, no markdown. That is written for someone walking back to a
+   * screen, which is exactly what this device is, so it makes a far better
+   * headline than the opening paragraph of a long reply.
+   *
+   * Absent most of the time. It needs three user turns in the session, two
+   * since the last recap, an empty input box and no pending background work,
+   * so it lands on roughly a fifth of turns (measured: 391 of 2001). Treat it
+   * as a bonus on top of the reply, never as what the screen depends on.
+   */
+  recap?: string;
+  /** ISO-8601 timestamp of that recap. Only sent when newer than `updated`. */
+  recapAt?: string;
+  /**
+   * Where this session's transcript lives, published by the hook so the server
+   * can tail it for the recap. No hook fires when a recap is written, so
+   * watching the file is the only way to see one. The client has no use for it.
+   */
+  transcript?: string;
 };
 
 export type StatusPayload = {

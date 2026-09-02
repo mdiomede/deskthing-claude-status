@@ -27,6 +27,10 @@ export default {
         // Deliberately steep steps (>=1.25) so hierarchy survives distance.
         tag: ["0.8125rem", { lineHeight: "1", letterSpacing: "0.14em" }],
         row: ["2.25rem", { lineHeight: "1.05", letterSpacing: "-0.015em" }],
+        // Between the reply body and a row heading. The recap is the headline
+        // of the reading pane, so it has to outrank the reply without becoming
+        // a title - it is still a sentence you read, not a label you scan.
+        recap: ["1.55rem", { lineHeight: "1.35", letterSpacing: "-0.01em" }],
         headline: ["4.25rem", { lineHeight: "0.95", letterSpacing: "-0.03em" }],
         blast: ["6.5rem", { lineHeight: "0.88", letterSpacing: "-0.04em" }],
       },

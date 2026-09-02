@@ -10,7 +10,7 @@
 
 import { createDeskThing } from "@deskthing/server";
 import { AppSettings, DESKTHING_EVENTS, SETTING_TYPES } from "@deskthing/types";
-import { readFile } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -50,6 +50,105 @@ let lastSerialized = "";
 let reading = false;
 
 const VALID_STATES: SessionState[] = ["blocked", "working", "idle", "done"];
+
+/* ---------------------------------------------------------------------------
+ * Recaps: Claude Code's own "away summary", pulled out of the transcript.
+ *
+ * About three minutes after a turn ends - and only while the terminal is
+ * unfocused - Claude appends a system record of subtype "away_summary" to the
+ * session's .jsonl: under 40 words, plain sentences, no markdown, written for
+ * someone walking back to a screen. That is a better headline for a display
+ * read from across the room than the first paragraph of a long reply, so the
+ * client shows it above the reply rather than instead of it.
+ *
+ * No hook fires when one is written, which is why this is here and not in
+ * claude-status.ps1: the file has to be watched.
+ * ------------------------------------------------------------------------- */
+
+/** Only the tail is ever read. A recap is the last thing written to a session's
+ *  transcript, and these files reach tens of megabytes. */
+const TAIL_BYTES = 64 * 1024;
+
+/** Claude appends this to a session's first few recaps. It is a hint for the
+ *  terminal, not part of the summary, and it is noise on an 800x480 screen. */
+const RECAP_FOOTER = /\s*\(disable recaps in \/config\)\s*$/;
+
+type Recap = { text: string; at: string };
+
+/** Re-reading an unchanged file every second would be pure waste, so results
+ *  are held against the file's size and mtime and only recomputed when the
+ *  transcript actually grows. */
+const recapCache = new Map<
+  string,
+  { size: number; mtimeMs: number; recap: Recap | null }
+>();
+
+const parseRecap = (chunk: string, truncated: boolean): Recap | null => {
+  const lines = chunk.split("\n");
+  // When the read started mid-file, line 0 is the tail of a record that began
+  // before the window and cannot be parsed. When it did not, line 0 is a whole
+  // record like any other.
+  const first = truncated ? 1 : 0;
+  for (let i = lines.length - 1; i >= first; i--) {
+    const line = lines[i];
+    // Cheap reject first: JSON.parse on every line of 64 KB, once a second,
+    // is the kind of thing that turns a status board into a space heater.
+    if (!line.includes("away_summary")) continue;
+    try {
+      const rec = JSON.parse(line);
+      if (rec?.type === "system" && rec?.subtype === "away_summary") {
+        const text = String(rec.content ?? "").replace(RECAP_FOOTER, "").trim();
+        if (text && typeof rec.timestamp === "string") {
+          return { text, at: rec.timestamp };
+        }
+      }
+    } catch {
+      /* a torn line mid-write - the next poll gets it */
+    }
+  }
+  return null;
+};
+
+const readRecap = async (path: string): Promise<Recap | null> => {
+  let size: number;
+  let mtimeMs: number;
+  try {
+    const st = await stat(path);
+    size = st.size;
+    mtimeMs = st.mtimeMs;
+  } catch {
+    recapCache.delete(path);
+    return null;
+  }
+
+  const hit = recapCache.get(path);
+  if (hit && hit.size === size && hit.mtimeMs === mtimeMs) return hit.recap;
+
+  let recap: Recap | null = null;
+  let fh;
+  try {
+    fh = await open(path, "r");
+    const len = Math.min(TAIL_BYTES, size);
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, Math.max(0, size - len));
+    recap = parseRecap(buf.toString("utf-8"), size > len);
+  } catch {
+    recap = null;
+  } finally {
+    await fh?.close().catch(() => {});
+  }
+
+  recapCache.set(path, { size, mtimeMs, recap });
+  return recap;
+};
+
+/** Forget transcripts belonging to sessions that no longer exist, so a machine
+ *  left running for a week does not accumulate an entry per session ever seen. */
+const pruneRecapCache = (live: Set<string>) => {
+  for (const path of recapCache.keys()) {
+    if (!live.has(path)) recapCache.delete(path);
+  }
+};
 
 const readSessions = async (): Promise<StatusPayload> => {
   const now = new Date().toISOString();
@@ -93,6 +192,7 @@ const readSessions = async (): Promise<StatusPayload> => {
         : v.message
         ? [String(v.message)]
         : undefined,
+      transcript: v.transcript || undefined,
     }))
     .sort((a, b) => {
       if (a.state === "blocked" && b.state !== "blocked") return -1;
@@ -100,7 +200,42 @@ const readSessions = async (): Promise<StatusPayload> => {
       return (b.updated || "").localeCompare(a.updated || "");
     });
 
+  await attachRecaps(sessions);
+
   return { sessions, updated: now };
+};
+
+/**
+ * Hang each session's recap off it, if it has one that belongs to the reply
+ * currently on screen.
+ *
+ * The timestamp test is the whole correctness argument. `updated` is when the
+ * session last reported - for a finished turn, when it finished - so a recap
+ * newer than that describes THIS turn, and one older describes a turn that has
+ * already been superseded. Without it, submitting a new prompt would leave the
+ * previous turn's summary sitting over the new reply as though it described it.
+ */
+const attachRecaps = async (sessions: ClaudeSession[]) => {
+  const live = new Set<string>();
+
+  await Promise.all(
+    sessions.map(async (s) => {
+      if (!s.transcript) return;
+      live.add(s.transcript);
+
+      const recap = await readRecap(s.transcript);
+      if (!recap) return;
+
+      const at = Date.parse(recap.at);
+      const updated = Date.parse(s.updated);
+      if (!Number.isFinite(at) || !Number.isFinite(updated) || at <= updated) return;
+
+      s.recap = recap.text;
+      s.recapAt = recap.at;
+    })
+  );
+
+  pruneRecapCache(live);
 };
 
 const pushStatus = async (clientId?: string, force = false) => {
@@ -113,6 +248,10 @@ const pushStatus = async (clientId?: string, force = false) => {
     if (!cfg.showDone) {
       payload.sessions = payload.sessions.filter((s) => s.state !== "done");
     }
+
+    // The device never needs the path, and shipping it would put a chunk of
+    // unchanging string into every diff and every websocket frame.
+    for (const s of payload.sessions) delete s.transcript;
 
     const serialized = JSON.stringify(payload.sessions) + (payload.error ?? "");
     if (!clientId && !force && serialized === lastSerialized) return;
