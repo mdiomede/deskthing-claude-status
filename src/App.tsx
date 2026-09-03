@@ -528,37 +528,48 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    // Set by whichever path answers first, so the other one stops asking.
+    let answered = false;
+
+    // Listen BEFORE asking, so an answer cannot arrive between the two.
+    const off = DeskThing.on(SERVER_TYPE.STATUS, (data) => {
+      if (data.payload) {
+        answered = true;
+        setStatus(data.payload);
+      }
+    });
 
     // Ask the server for current state, and keep asking until we get an answer.
     //
     // A single request is not enough: the server's poll only broadcasts on
-    // CHANGE, so if nothing has changed since it started, a client that opens
-    // later gets no broadcast at all. This request is the only thing that
-    // populates the screen in that case, and it times out at 500ms while the
-    // app is still booting. So retry with backoff instead of giving up.
+    // CHANGE, so a client that opens when nothing has changed since the last
+    // broadcast gets nothing at all. This request is the only thing that
+    // populates the screen in that case.
+    //
+    // It also must not give up. Switching to another app and back remounts this
+    // component with no state, and if the handful of early attempts all miss,
+    // the board sits empty until something unrelated happens to change - which
+    // reads as "the app lost my sessions". Keep asking on a capped backoff
+    // until an answer arrives, from either path.
     const load = async (attempt = 0) => {
-      if (cancelled) return;
+      if (cancelled || answered) return;
       try {
         const res = await DeskThing.fetch(
           { type: CLIENT_TYPE.STATUS, request: "get", payload: undefined },
           { type: SERVER_TYPE.STATUS, request: "update" }
         );
         if (!cancelled && res?.payload) {
+          answered = true;
           setStatus(res.payload);
           return;
         }
       } catch {
         /* fall through to retry */
       }
-      if (!cancelled && attempt < 6) {
-        setTimeout(() => load(attempt + 1), 400 + attempt * 600);
-      }
+      if (cancelled || answered) return;
+      setTimeout(() => load(attempt + 1), Math.min(400 + attempt * 600, 4000));
     };
     load();
-
-    const off = DeskThing.on(SERVER_TYPE.STATUS, (data) => {
-      if (data.payload) setStatus(data.payload);
-    });
 
     const t = setInterval(() => setTick((n) => n + 1), 5000);
 

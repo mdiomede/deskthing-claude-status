@@ -72,7 +72,8 @@ let cfg = { ...DEFAULTS };
 let cancelPoll: (() => void) | null = null;
 let armedIntervalMs = 0;
 let lastSerialized = "";
-let reading = false;
+/** The read currently in progress, shared by everyone who asks during it. */
+let inFlight: Promise<StatusPayload> | null = null;
 
 const VALID_STATES: SessionState[] = ["blocked", "working", "idle", "done"];
 
@@ -362,12 +363,33 @@ const persistReadMarks = () => {
   }
 };
 
+/**
+ * One read at a time, but nobody is ever turned away.
+ *
+ * This used to be a `if (reading) return` flag, which quietly DROPPED any
+ * request that arrived while a read was in progress. That was survivable while
+ * reading meant one small readFile. Once the read grew to a stat+open+read per
+ * session transcript, the window got wide enough to swallow the request a
+ * freshly-opened client makes on mount - and since the poll only broadcasts on
+ * CHANGE, the app then sat empty until something happened to change. Switching
+ * to the clock and back lost the whole board until the next turn ended.
+ *
+ * Sharing the in-flight promise keeps the original guarantee - a slow disk
+ * still cannot stack reads on top of each other - while making a request wait
+ * for the answer instead of being thrown away.
+ */
+const readSessionsShared = (): Promise<StatusPayload> => {
+  if (!inFlight) {
+    inFlight = readSessions().finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+};
+
 const pushStatus = async (clientId?: string, force = false) => {
-  // A slow disk must never let ticks pile up on top of each other.
-  if (reading) return;
-  reading = true;
   try {
-    const payload = await readSessions();
+    const payload = await readSessionsShared();
 
     if (!cfg.showDone) {
       payload.sessions = payload.sessions.filter((s) => s.state !== "done");
@@ -387,8 +409,11 @@ const pushStatus = async (clientId?: string, force = false) => {
       request: "update",
       payload,
     });
-  } finally {
-    reading = false;
+  } catch (err) {
+    // Never reject. Every caller invokes this as `void pushStatus()`, and an
+    // unhandled rejection takes the whole app process down with it - which
+    // would look exactly like this bug, only permanent.
+    console.warn("[claude-status] push failed", err);
   }
 };
 
@@ -540,7 +565,7 @@ const stop = async () => {
   cancelPoll = null;
   armedIntervalMs = 0;
   lastSerialized = "";
-  reading = false;
+  inFlight = null;
   console.log("[claude-status] stopped");
 };
 
