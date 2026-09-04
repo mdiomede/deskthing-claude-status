@@ -146,7 +146,7 @@ const Alert: React.FC<{ blocked: ClaudeSession[]; others: number }> = ({
     <div className="flex h-screen w-screen animate-breathe flex-col justify-between bg-signal px-10 py-9 text-ground">
       <div className="flex items-baseline justify-between">
         <span className="text-tag font-bold uppercase">Waiting on you</span>
-        <span className="text-tag font-semibold uppercase opacity-70">
+        <span className="text-tag font-semibold uppercase text-groundsoft">
           {elapsed(lead.updated)}
         </span>
       </div>
@@ -162,7 +162,7 @@ const Alert: React.FC<{ blocked: ClaudeSession[]; others: number }> = ({
         {blocked.length > 1 && (
           <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1">
             {blocked.slice(1).map((s) => (
-              <span key={s.id} className="text-row font-bold opacity-80">
+              <span key={s.id} className="text-row font-bold text-groundsoft">
                 {s.project}
               </span>
             ))}
@@ -170,7 +170,7 @@ const Alert: React.FC<{ blocked: ClaudeSession[]; others: number }> = ({
         )}
       </div>
 
-      <div className="text-tag font-semibold uppercase opacity-60">
+      <div className="text-tag font-semibold uppercase text-groundsoft">
         {blocked.length > 1
           ? `${blocked.length} sessions blocked`
           : others > 0

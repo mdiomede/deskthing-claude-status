@@ -17,6 +17,10 @@ export default {
         // The one saturated colour. It only ever appears when a session is
         // actually waiting on a human, so its presence is the message.
         signal: "oklch(0.79 0.165 76)",
+        // Muted text ON the amber alert. Was expressed as opacity-60/70/80,
+        // which renders text with greyscale antialiasing and reads as fuzzy
+        // grey rather than dimmer. A solid colour keeps the glyphs crisp.
+        groundsoft: "oklch(0.38 0.060 74)",
         signaldim: "oklch(0.62 0.130 76)",
         // Status hues. Amber stays reserved for "waiting on you" - these two sit
         // at a similar lightness so no single state out-shouts the alert.
@@ -39,9 +43,20 @@ export default {
         blast: ["6.5rem", { lineHeight: "0.88", letterSpacing: "-0.04em" }],
       },
       keyframes: {
+        // Breathe the BACKGROUND, never the element.
+        //
+        // This animated `opacity` on the alert's root container, so the whole
+        // screen - text included - dimmed to 82% and back every 2.6s. An
+        // animated opacity also promotes the element to its own compositing
+        // layer, which switches Chromium from subpixel to greyscale text
+        // antialiasing: the text visibly went grey and then snapped back to
+        // crisp white. Reported as eye strain, and rightly.
+        //
+        // Animating background-color is a paint-only change. The pulse still
+        // reads from across the room, and no glyph is touched.
         breathe: {
-          "0%, 100%": { opacity: "1" },
-          "50%": { opacity: "0.82" },
+          "0%, 100%": { backgroundColor: "oklch(0.79 0.165 76)" },
+          "50%": { backgroundColor: "oklch(0.71 0.148 76)" },
         },
 challenge: {
           "0%": { transform: "translateY(6px)", opacity: "0" },
