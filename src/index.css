@@ -15,7 +15,11 @@
 
   body {
     margin: 0;
-    -webkit-font-smoothing: antialiased;
+    /* No -webkit-font-smoothing override.
+       "antialiased" forces greyscale antialiasing, which renders every glyph
+       thinner and lower-contrast than the platform default. On a 480p panel
+       read from across a desk that is the wrong trade: it was making white
+       text look grey even when nothing was animating. Let the device pick. */
     -webkit-tap-highlight-color: transparent;
     user-select: none;
     font-family:

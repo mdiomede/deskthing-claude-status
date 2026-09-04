@@ -454,8 +454,16 @@ const Reader: React.FC<{
           <div
             ref={scroller}
             className="min-h-0 flex-1 overflow-y-auto px-7 pb-8"
-            style={{ WebkitOverflowScrolling: "touch" }}
           >
+            {/* No -webkit-overflow-scrolling: touch on this pane, deliberately.
+                It forces the pane onto its own composited layer for momentum
+                scrolling, and on this panel that means the text is
+                re-rasterised while the scroll is moving - it visibly goes grey
+                and soft, then snaps back to crisp when it stops. Reported as
+                eye strain while reading, which is the one thing this pane
+                exists for. The property is a legacy iOS knob Chromium does not
+                need; ordinary overflow scrolling works just as well here and
+                keeps the glyphs on the main layer. */}
             {/* History pager. Sits under the header, not in it: the top edge is
                 the system pull-down and the bottom is the now-playing bar, so
                 touch targets have to live in the middle band. Hidden entirely
